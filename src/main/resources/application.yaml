@@ -1,3 +1,46 @@
 spring:
   application:
     name: doc-relay
+  task:
+    scheduling:
+      pool:
+        size: 4
+
+server:
+  port: -1
+
+management:
+  server:
+    port: 9090
+    address: 127.0.0.1
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus, outbox
+
+relay:
+  instance-id: ${HOSTNAME:doc-relay-local}
+  drain:
+    batch-size: 100
+  polling:
+    interval: 10s
+  backoff:
+    base: 10s
+    max: 5m
+    max-attempts: 5
+  dead:
+    recovery-delay: 10m
+    recovery-scan-interval: 5m
+  zombie:
+    lock-timeout: 5m
+    scan-interval: 1m
+  listener:
+    enabled: true
+    channel: outbox_event
+    reconnect-base: 1s
+    reconnect-max: 30s
+  metrics:
+    gauge-refresh-interval: 30s
+  kafka:
+    topic: doc.events.v1
+    partitions: 3
