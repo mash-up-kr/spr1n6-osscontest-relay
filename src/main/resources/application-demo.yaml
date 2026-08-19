@@ -1,0 +1,29 @@
+# 시연용. 기본값(DEAD 까지 2.5분 + 복구 10분)은 관객이 기다리기엔 너무 길다.
+#
+# spring.datasource.*/spring.kafka.bootstrap-servers 도 여기서 채운다: 운영/테스트 프로파일에는
+# 이 값들이 없다 — 운영은 실제 배포 환경이, 테스트는 Testcontainers 의 @ServiceConnection 이
+# JdbcConnectionDetails/KafkaConnectionDetails 를 대신 공급하기 때문이다. 이 데모는 Testcontainers
+# 가 아니라 demo/docker-compose.yml 로 띄운 실제 컨테이너에 붙으므로 접속 정보를 직접 명시한다.
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/docrelay
+    username: docrelay
+    password: docrelay
+  kafka:
+    bootstrap-servers: localhost:9092
+
+relay:
+  polling:
+    interval: 3s
+  backoff:
+    base: 2s
+    max: 20s
+    max-attempts: 5
+  dead:
+    recovery-delay: 30s
+    recovery-scan-interval: 10s
+  zombie:
+    lock-timeout: 30s
+    scan-interval: 5s
+  metrics:
+    gauge-refresh-interval: 5s
