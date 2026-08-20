@@ -44,11 +44,26 @@ class OutboxRepository(
 			.query(ROW_MAPPER)
 			.list()
 
-	/** Kafka 가 받았다고 응답한 행들을 한 번의 UPDATE 로 PUBLISHED 로 내린다. */
-	fun markPublished(ids: List<UUID>): Int {
+	/**
+	 * Kafka 가 받았다고 응답한 행들을 한 번의 UPDATE 로 PUBLISHED 로 내린다.
+	 *
+	 * WHERE 절이 status·locked_by·locked_at 세 조건을 모두 건다. 좀비 회수가 있는 한, 이
+	 * 행을 선점했던 사이클이 아직 살아있다는 보장이 없다 — 발행 중에 락이 만료되어 다른
+	 * 사이클(같은 인스턴스일 수도, 다른 인스턴스일 수도 있다)이 이미 다시 잡아 처리했을 수
+	 * 있으므로, 결과를 쓰기 직전에 "지금도 내가 주인인가"를 다시 확인해야 한다.
+	 *
+	 * instanceId 만으로는 부족하다 — 릴레이가 한 대뿐이면 자기 자신이 회수당했다가 같은
+	 * 사이클에서 재선점해도 instanceId 는 항상 같기 때문이다. claimedAt(=locked_at)이 그
+	 * 빈틈을 메운다. 선점 SQL은 한 문장짜리 UPDATE라 그 안에서 now()가 한 번만 평가되므로,
+	 * 같은 배치로 잡힌 행은 모두 같은 locked_at을 갖는다 — 즉 "이번 선점 시각"이 사이클 하나를
+	 * 가리키는 값이 되고, 그래서 새 컬럼 없이도 배치 UPDATE를 유지한 채 소유권을 확인할 수 있다.
+	 */
+	fun markPublished(ids: List<UUID>, instanceId: String, claimedAt: java.time.Instant): Int {
 		if (ids.isEmpty()) return 0
 		return jdbc.sql(MARK_PUBLISHED_SQL)
 			.param("ids", ids)
+			.param("instanceId", instanceId)
+			.param("claimedAt", java.sql.Timestamp.from(claimedAt))
 			.update()
 	}
 
@@ -62,8 +77,10 @@ class OutboxRepository(
 	 * 다음 시도 시각을 애플리케이션이 아니라 SQL 식으로 계산하는 이유는, 행마다 재시도 횟수가
 	 * 달라서다. 애플리케이션에서 계산한 값 하나를 넘기면 모든 행이 같은 대기 시간을 갖게 되고,
 	 * 제대로 하려면 행마다 UPDATE 를 따로 날려야 한다.
+	 *
+	 * [markPublished] 와 같은 소유권 조건을 결과 실패 기록에도 적용한다.
 	 */
-	fun markFailed(ids: List<UUID>, message: String): Int {
+	fun markFailed(ids: List<UUID>, message: String, instanceId: String, claimedAt: java.time.Instant): Int {
 		if (ids.isEmpty()) return 0
 		return jdbc.sql(MARK_FAILED_SQL)
 			.param("ids", ids)
@@ -72,6 +89,23 @@ class OutboxRepository(
 			.param("baseSeconds", backoffPolicy.baseSeconds)
 			.param("maxSeconds", backoffPolicy.maxSeconds)
 			.param("deadRecoveryDelaySeconds", properties.dead.recoveryDelay.toMillis() / 1000.0)
+			.param("instanceId", instanceId)
+			.param("claimedAt", java.sql.Timestamp.from(claimedAt))
+			.update()
+	}
+
+	/**
+	 * 영구 실패를 재시도 없이 곧바로 "정지된 DEAD"로 보낸다. [markFailed] 와 같은
+	 * 소유권 조건을 쓰되, 시도 횟수 임계값을 보지 않고 무조건 DEAD + next_attempt_at = 'infinity'
+	 * 다 — 새 상태나 컬럼을 만들지 않고 기존 정지 스위치를 재사용한다.
+	 */
+	fun markDead(ids: List<UUID>, message: String, instanceId: String, claimedAt: java.time.Instant): Int {
+		if (ids.isEmpty()) return 0
+		return jdbc.sql(MARK_DEAD_SQL)
+			.param("ids", ids)
+			.param("message", message)
+			.param("instanceId", instanceId)
+			.param("claimedAt", java.sql.Timestamp.from(claimedAt))
 			.update()
 	}
 
@@ -130,6 +164,14 @@ class OutboxRepository(
 	 */
 	fun republish(id: UUID): Int =
 		jdbc.sql(REPUBLISH_SQL).param("id", id).update()
+
+	/**
+	 * 자동 복구를 기다리지 않고 지금 바로 다시 발행하게 한다. [republish] 와 달리 대상이
+	 * PUBLISHED 행이다 — 브로커 재시작으로 PUBLISHED 기록과 달리 실제로는 유실된 메시지를
+	 * 되돌리거나, 워커가 "처리되지 않았다"고 판정해 재발행을 요청할 때 쓴다.
+	 */
+	fun forceRepublish(id: UUID): Int =
+		jdbc.sql(FORCE_REPUBLISH_SQL).param("id", id).update()
 
 	/**
 	 * 상태별 건수를 센다. 지표 갱신과 어드민 조회가 같이 쓴다.
@@ -200,6 +242,7 @@ class OutboxRepository(
 				traceId = rs.getString("trace_id"),
 				publishAttemptCount = rs.getInt("publish_attempt_count"),
 				createdAt = rs.getTimestamp("created_at").toInstant(),
+				lockedAt = rs.getTimestamp("locked_at").toInstant(),
 			)
 		}
 
@@ -220,7 +263,7 @@ class OutboxRepository(
 			 WHERE o.id = c.id
 			RETURNING o.id, o.tenant_id, o.document_id, o.document_version_id,
 			          o.event_type, o.event_schema_version, o.payload::text AS payload,
-			          o.trace_id, o.publish_attempt_count, o.created_at
+			          o.trace_id, o.publish_attempt_count, o.created_at, o.locked_at
 			""".trimIndent()
 
 		// 여러 id 를 넘길 때 = ANY(:ids) 가 아니라 IN (:ids) 를 쓴다. PostgreSQL JDBC 드라이버가
@@ -234,6 +277,9 @@ class OutboxRepository(
 			       locked_by = NULL,
 			       locked_at = NULL
 			 WHERE id IN (:ids)
+			   AND status = 'PUBLISHING'
+			   AND locked_by = :instanceId
+			   AND locked_at = :claimedAt
 			""".trimIndent()
 
 		val MARK_FAILED_SQL = """
@@ -251,6 +297,23 @@ class OutboxRepository(
 			       locked_by = NULL,
 			       locked_at = NULL
 			 WHERE id IN (:ids)
+			   AND status = 'PUBLISHING'
+			   AND locked_by = :instanceId
+			   AND locked_at = :claimedAt
+			""".trimIndent()
+
+		val MARK_DEAD_SQL = """
+			UPDATE outbox_event
+			   SET status = 'DEAD',
+			       publish_attempt_count = publish_attempt_count + 1,
+			       next_attempt_at = 'infinity',
+			       last_error_message = :message,
+			       locked_by = NULL,
+			       locked_at = NULL
+			 WHERE id IN (:ids)
+			   AND status = 'PUBLISHING'
+			   AND locked_by = :instanceId
+			   AND locked_at = :claimedAt
 			""".trimIndent()
 
 		val RECLAIM_ZOMBIES_SQL = """
@@ -284,6 +347,13 @@ class OutboxRepository(
 			   SET status = 'PENDING', publish_attempt_count = 0, next_attempt_at = now(),
 			       locked_by = NULL, locked_at = NULL
 			 WHERE id = :id AND status = 'DEAD'
+			""".trimIndent()
+
+		val FORCE_REPUBLISH_SQL = """
+			UPDATE outbox_event
+			   SET status = 'PENDING', publish_attempt_count = 0, next_attempt_at = now(),
+			       locked_by = NULL, locked_at = NULL
+			 WHERE id = :id AND status = 'PUBLISHED'
 			""".trimIndent()
 	}
 }

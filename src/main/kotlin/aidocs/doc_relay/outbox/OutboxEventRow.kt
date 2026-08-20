@@ -20,4 +20,6 @@ data class OutboxEventRow(
 	val traceId: String?,
 	val publishAttemptCount: Int,
 	val createdAt: Instant,
+	/** 이 행을 잡은 사이클의 표식. 결과 쓰기가 "지금 이 사이클이 여전히 주인인가"를 확인하는 데 쓴다. */
+	val lockedAt: Instant,
 )

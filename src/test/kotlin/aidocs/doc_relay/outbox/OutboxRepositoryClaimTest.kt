@@ -81,4 +81,21 @@ class OutboxRepositoryClaimTest : RelayIntegrationTest() {
 			.param("id", id).query(java.sql.Timestamp::class.java).single()
 		assertTrue(lockedAt != null)
 	}
+
+	@Test
+	fun `a claimed batch shares the same locked_at`() {
+		// 소유권 확인을 위한 배치 UPDATE 전체가 "한 배치는 같은 locked_at 을 공유한다"는 전제
+		// 위에 있다 — 그 전제가 깨지면 나중의 결과 쓰기(mark)가 어느 배치에 속하는지 구분할 수
+		// 없다.
+		val documentId = seedParents()
+		(1L..10L).forEach { insertVersion(documentId, versionNo = it) }
+
+		val claimed = repository.claimBatch(10)
+
+		assertEquals(10, claimed.size)
+		assertEquals(
+			1, claimed.map { it.lockedAt }.distinct().size,
+			"한 배치로 잡은 행은 전부 같은 locked_at 을 가져야 한다",
+		)
+	}
 }
