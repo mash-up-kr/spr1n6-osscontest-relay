@@ -1,13 +1,11 @@
 package aidocs.doc_relay
 
+import aidocs.doc_relay.support.RelayIntegrationTest
 import org.junit.jupiter.api.Test
-import org.springframework.boot.test.context.SpringBootTest
 
-@SpringBootTest
-class DocRelayApplicationTests {
+class DocRelayApplicationTests : RelayIntegrationTest() {
 
 	@Test
 	fun contextLoads() {
 	}
-
 }
