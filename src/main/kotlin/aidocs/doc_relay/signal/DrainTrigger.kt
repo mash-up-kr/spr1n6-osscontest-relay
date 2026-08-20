@@ -1,5 +1,6 @@
 package aidocs.doc_relay.signal
 
+import aidocs.doc_relay.RelayProperties
 import aidocs.doc_relay.outbox.OutboxDrainer
 import org.slf4j.LoggerFactory
 import org.springframework.context.SmartLifecycle
@@ -21,16 +22,21 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 빈 생성과 의존성 주입이 모두 끝난 뒤에만 start() 를 부른다.
  */
 @Component
-class DrainTrigger(private val drainer: OutboxDrainer) : SmartLifecycle {
+class DrainTrigger(
+	private val drainer: OutboxDrainer,
+	private val properties: RelayProperties,
+) : SmartLifecycle {
 
 	private val log = LoggerFactory.getLogger(javaClass)
 	private val pending = ArrayBlockingQueue<Unit>(1)
 	private val running = AtomicBoolean(false)
 	private val draining = AtomicBoolean(false)
+	private val shuttingDown = AtomicBoolean(false)
 	private var worker: Thread? = null
 
-	/** 신호를 보낸다. 기다리지 않으며, 이미 대기 중인 신호가 있으면 아무 일도 하지 않는다. */
+	/** 신호를 보낸다. 종료가 시작된 뒤에는 조용히 무시한다. */
 	fun signal() {
+		if (shuttingDown.get()) return
 		pending.offer(Unit)
 	}
 
@@ -49,13 +55,36 @@ class DrainTrigger(private val drainer: OutboxDrainer) : SmartLifecycle {
 
 	override fun start() {
 		if (!running.compareAndSet(false, true)) return
+		shuttingDown.set(false)
 		worker = Thread({ loop() }, "outbox-drainer").apply {
 			isDaemon = true
 			start()
 		}
 	}
 
+	/**
+	 * 새 신호를 먼저 막고, 진행 중인 사이클이 끝나기를 [상한][RelayProperties.Shutdown.drainTimeout]
+	 * 안에서 기다린 뒤에야 스레드를 끊는다. 그래야 배포마다 좀비 타임아웃 + 스캔 주기가
+	 * 붙는 것을 피한다. 상한을 넘기면 경고를 남기고 그대로 진행한다 — 무한히
+	 * 기다리면 배포 자체가 멈춘다. 못 끝낸 행은 좀비 회수가 안전망으로 처리한다.
+	 */
 	override fun stop() {
+		shuttingDown.set(true)
+		val deadline = System.currentTimeMillis() + properties.shutdown.drainTimeout.toMillis()
+		while (draining.get() && System.currentTimeMillis() < deadline) {
+			try {
+				Thread.sleep(100)
+			} catch (e: InterruptedException) {
+				Thread.currentThread().interrupt()
+				break
+			}
+		}
+		if (draining.get()) {
+			log.warn(
+				"드레인 대기 상한({}) 안에 진행 중이던 사이클이 끝나지 않았다. 좀비 회수가 나머지를 처리한다.",
+				properties.shutdown.drainTimeout,
+			)
+		}
 		running.set(false)
 		worker?.interrupt()
 	}
@@ -71,7 +100,7 @@ class DrainTrigger(private val drainer: OutboxDrainer) : SmartLifecycle {
 			try {
 				if (pending.poll(1, TimeUnit.SECONDS) == null) continue
 				draining.set(true)
-				drainer.drainUntilEmpty()
+				drainer.drainUntilEmpty { shuttingDown.get() }
 			} catch (e: InterruptedException) {
 				Thread.currentThread().interrupt()
 				return

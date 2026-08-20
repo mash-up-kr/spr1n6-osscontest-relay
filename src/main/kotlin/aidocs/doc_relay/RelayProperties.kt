@@ -22,6 +22,8 @@ data class RelayProperties(
 	val listener: Listener = Listener(),
 	val metrics: Metrics = Metrics(),
 	val kafka: Kafka = Kafka(),
+	val shutdown: Shutdown = Shutdown(),
+	val admin: Admin = Admin(),
 ) {
 	/** [batchSize] 는 한 사이클에 집어 올 행의 최대 개수. 이만큼 꽉 채워 오면 아직 밀린 게 있다는 뜻이다. */
 	data class Drain(val batchSize: Int = 100)
@@ -80,5 +82,23 @@ data class RelayProperties(
 	data class Kafka(
 		val topic: String = "doc.events.v1",
 		val partitions: Int = 3,
-	)
+		val producer: Producer = Producer(),
+	) {
+		/**
+		 * 기본값에 맡기지 않고 명시한다. 예산 관계(사이클 상한 < 좀비 회수 타임아웃)가
+		 * 이 값들 위에 서 있어서, 기본값이 조용히 바뀌면 그 관계도 조용히 깨진다.
+		 */
+		data class Producer(
+			val maxBlock: Duration = Duration.ofSeconds(10),
+			val requestTimeout: Duration = Duration.ofSeconds(30),
+			val deliveryTimeout: Duration = Duration.ofSeconds(120),
+			val maxRequestSize: Int = 1_048_576,
+		)
+	}
+
+	/** 정상 종료 시 진행 중인 드레인 사이클을 기다리는 상한. */
+	data class Shutdown(val drainTimeout: Duration = Duration.ofSeconds(30))
+
+	/** 쓰기 액션 최소 인증. [token] 이 비어 있으면(기본값) 인증은 비활성이다. */
+	data class Admin(val token: String = "")
 }

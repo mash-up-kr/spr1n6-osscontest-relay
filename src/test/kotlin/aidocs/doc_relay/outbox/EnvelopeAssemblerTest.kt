@@ -25,6 +25,7 @@ class EnvelopeAssemblerTest {
 		traceId = "0af7651916cd43dd",
 		publishAttemptCount = 0,
 		createdAt = Instant.parse("2026-08-13T09:14:22Z"),
+		lockedAt = Instant.now(),
 	)
 
 	@Test
@@ -36,7 +37,7 @@ class EnvelopeAssemblerTest {
 		assertEquals(42, node["documentId"].asInt())
 		assertEquals(137, node["documentVersionId"].asInt())
 		assertEquals(1, node["schemaVersion"].asInt())
-		// 최상위 occurredAt 은 outbox_event.created_at 에서 온다 (spec §7)
+		// 최상위 occurredAt 은 outbox_event.created_at 에서 온다.
 		assertEquals("2026-08-13T09:14:22Z", node["occurredAt"].asString())
 	}
 
@@ -50,7 +51,8 @@ class EnvelopeAssemblerTest {
 
 	@Test
 	fun `copies event type without branching`() {
-		// DOCUMENT_DELETED 가 CHECK 에 추가돼도 릴레이 코드는 그대로여야 한다 (spec §7)
+		// DOCUMENT_DELETED 처럼 새 이벤트 타입이 CHECK 제약(허용값을 제한하는 DB 제약 조건)에
+		// 추가돼도 릴레이 코드는 분기 없이 그대로 통과시켜야 한다.
 		val node = mapper.readTree(assembler.assemble(row(eventType = "DOCUMENT_DELETED")))
 		assertEquals("DOCUMENT_DELETED", node["eventType"].asString())
 	}

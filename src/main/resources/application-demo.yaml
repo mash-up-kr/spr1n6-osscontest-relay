@@ -27,3 +27,8 @@ relay:
     scan-interval: 5s
   metrics:
     gauge-refresh-interval: 5s
+  kafka:
+    producer:
+      max-block: 3s
+      request-timeout: 5s
+      delivery-timeout: 10s
