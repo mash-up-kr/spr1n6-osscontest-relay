@@ -35,32 +35,88 @@ class OutboxDrainer(
 		val claimed = repository.claimBatch(properties.drain.batchSize)
 		if (claimed.isEmpty()) return 0
 		metrics.recordBatchSize(claimed.size)
+		val byId = claimed.associateBy { it.id }
+		val instanceId = properties.instanceId
+		// 선점 SQL은 한 문장짜리 UPDATE라 now()가 한 번만 평가되고, 그 배치로 잡힌 행은
+		// 전부 같은 locked_at을 갖는다. 그래서 첫 행 것만 꺼내 배치 전체의 소유권 표식으로 쓴다.
+		val claimedAt = claimed.first().lockedAt
 
 		val outcome = publisher.publish(claimed)
 
-		repository.markPublished(outcome.succeeded)
-		metrics.recordPublished(outcome.succeeded.size)
-		val byId = claimed.associateBy { it.id }
-		outcome.succeeded.forEach { id -> byId[id]?.let { metrics.recordLatency(it.createdAt) } }
+		markPublishedSafely(outcome.succeeded, instanceId, claimedAt, byId)
 
-		outcome.failed.forEach { (message, ids) ->
-			withRowContext(ids, byId) { log.warn("발행 실패 {}건: {}", ids.size, message) }
-			repository.markFailed(ids, message)
-			metrics.recordPublishFailed(ids.size)
-			// 이번 실패로 DEAD 가 된 행이 몇 건인지 센다. 자동 복구가 재시도 횟수를 0으로
-			// 되돌리기 때문에 DB 만 봐서는 몇 바퀴째 돌고 있는지 알 수 없고, 이 지표가
-			// 같은 이벤트가 계속 순환하고 있다는 것을 알 수 있는 유일한 수단이다.
-			val deadIds = ids.filter { id ->
-				(byId[id]?.publishAttemptCount ?: 0) + 1 >= properties.backoff.maxAttempts
-			}
-			if (deadIds.isNotEmpty()) {
-				metrics.recordDeadTransition(deadIds.size)
-				withRowContext(deadIds, byId) {
-					log.warn("DEAD 전환 {}건. 마지막 에러: {}", deadIds.size, message)
+		outcome.failed.forEach { (group, ids) ->
+			withRowContext(ids, byId) { log.warn("발행 실패 {}건: {}", ids.size, group.message) }
+			if (group.permanent) {
+				markDeadSafely(ids, group.message, instanceId, claimedAt)
+				metrics.recordDeadTransition(ids.size)
+				withRowContext(ids, byId) {
+					log.warn("DEAD 전환(영구 실패) {}건. 사유: {}", ids.size, group.message)
+				}
+			} else {
+				markFailedSafely(ids, group.message, instanceId, claimedAt)
+				val deadIds = ids.filter { id ->
+					(byId[id]?.publishAttemptCount ?: 0) + 1 >= properties.backoff.maxAttempts
+				}
+				if (deadIds.isNotEmpty()) {
+					metrics.recordDeadTransition(deadIds.size)
+					withRowContext(deadIds, byId) {
+						log.warn("DEAD 전환 {}건. 마지막 에러: {}", deadIds.size, group.message)
+					}
 				}
 			}
 		}
 		return claimed.size
+	}
+
+	/**
+	 * 성공/실패 반영을 각각 독립적으로 실행한다. 하나가 DB 예외로 던져도 다른 하나는 그대로
+	 * 돈다 — 순차 구조에서 앞이 던지면 뒤가 한 줄도 실행되지 않으면, 지표라는 유일한 관측
+	 * 창까지 함께 닫힌다. `internal` 가시성은 이 독립성을 직접 테스트하기 위함이다.
+	 */
+	internal fun markPublishedSafely(
+		ids: List<UUID>, instanceId: String, claimedAt: java.time.Instant, byId: Map<UUID, OutboxEventRow>,
+	) {
+		if (ids.isEmpty()) return
+		try {
+			val updated = repository.markPublished(ids, instanceId, claimedAt)
+			reportStaleness(ids, updated)
+			metrics.recordPublished(updated)
+			ids.forEach { id -> byId[id]?.let { metrics.recordLatency(it.createdAt, it.publishAttemptCount == 0) } }
+		} catch (e: Exception) {
+			log.error("성공 반영 실패: {}건", ids.size, e)
+			metrics.recordMarkFailure()
+		}
+	}
+
+	internal fun markFailedSafely(ids: List<UUID>, message: String, instanceId: String, claimedAt: java.time.Instant) {
+		try {
+			val updated = repository.markFailed(ids, message, instanceId, claimedAt)
+			reportStaleness(ids, updated)
+			metrics.recordPublishFailed(updated)
+		} catch (e: Exception) {
+			log.error("실패 반영 실패: {}건", ids.size, e)
+			metrics.recordMarkFailure()
+		}
+	}
+
+	internal fun markDeadSafely(ids: List<UUID>, message: String, instanceId: String, claimedAt: java.time.Instant) {
+		try {
+			val updated = repository.markDead(ids, "PERMANENT: $message", instanceId, claimedAt)
+			reportStaleness(ids, updated)
+			metrics.recordPublishFailed(updated)
+		} catch (e: Exception) {
+			log.error("DEAD 반영 실패: {}건", ids.size, e)
+			metrics.recordMarkFailure()
+		}
+	}
+
+	private fun reportStaleness(ids: List<UUID>, updated: Int) {
+		val stale = ids.size - updated
+		if (stale > 0) {
+			metrics.recordStaleWrite(stale)
+			log.warn("소유권을 잃은 뒤늦은 결과 쓰기 {}건이 튕겨났다", stale)
+		}
 	}
 
 	/**
@@ -82,17 +138,17 @@ class OutboxDrainer(
 	}
 
 	/**
-	 * 밀린 것이 없어질 때까지 사이클을 반복한다.
-	 *
-	 * 한 번에 집어 오는 상한만큼 꽉 채워 왔다면 아직 남아 있다는 뜻이므로, 다음 신호를
-	 * 기다리지 않고 바로 다시 돈다. 상한보다 적게 왔으면 다 비운 것이다.
+	 * 밀린 것이 없어질 때까지 사이클을 반복한다. [shouldStop] 이 true 를 돌려주면 아직 밀린
+	 * 것이 남아 있어도 즉시 멈춘다 — 종료 신호를 사이클과 사이클 사이에서만 보면, 백로그가
+	 * 클 때 신호를 오래 무시하게 된다.
 	 */
-	fun drainUntilEmpty(): Int {
+	fun drainUntilEmpty(shouldStop: () -> Boolean = { false }): Int {
 		var total = 0
 		while (true) {
 			val drained = drainOnce()
 			total += drained
 			if (drained < properties.drain.batchSize) return total
+			if (shouldStop()) return total
 		}
 	}
 }
