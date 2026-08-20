@@ -37,13 +37,26 @@ class RelayMetricsTest : RelayIntegrationTest() {
 	}
 
 	@Test
-	fun `records publish latency from created_at`() {
+	fun `records publish latency tagged by whether it was the first attempt`() {
 		val documentId = seedParents()
 		insertVersion(documentId)
 
 		drainer.drainOnce()
 
-		assertTrue(registry.timer("relay.publish.latency").count() >= 1)
+		assertTrue(registry.timer("relay.publish.latency", "attempt", "first").count() >= 1)
+		assertEquals(0.0, registry.timer("relay.publish.latency", "attempt", "retry").count().toDouble())
+	}
+
+	@Test
+	fun `records rejected result writes under the stale-write counter`() {
+		// 이 테스트는 지표 카운터(relay.stale.write.total) 가 실제로 증가하는지만 확인한다.
+		// 소유권을 잃은 뒤늦은 쓰기가 SQL 레벨에서 실제로 튕기는지는 OutboxRepositoryMarkTest 에서
+		// 별도로 검증한다.
+		val before = registry.counter("relay.stale.write.total").count()
+
+		metrics.recordStaleWrite(2)
+
+		assertEquals(before + 2, registry.counter("relay.stale.write.total").count())
 	}
 
 	@Test

@@ -22,5 +22,11 @@ class RelayPropertiesTest {
 		assertEquals("outbox_event", properties.listener.channel)
 		assertEquals("doc.events.v1", properties.kafka.topic)
 		assertEquals(3, properties.kafka.partitions)
+		assertEquals(java.time.Duration.ofSeconds(10), properties.kafka.producer.maxBlock)
+		assertEquals(java.time.Duration.ofSeconds(30), properties.kafka.producer.requestTimeout)
+		assertEquals(java.time.Duration.ofSeconds(120), properties.kafka.producer.deliveryTimeout)
+		assertEquals(1_048_576, properties.kafka.producer.maxRequestSize)
+		assertEquals(java.time.Duration.ofSeconds(30), properties.shutdown.drainTimeout)
+		assertEquals("", properties.admin.token)
 	}
 }

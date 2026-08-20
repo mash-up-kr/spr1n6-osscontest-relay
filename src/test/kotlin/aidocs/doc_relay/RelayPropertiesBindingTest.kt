@@ -45,5 +45,14 @@ class RelayPropertiesBindingTest : RelayIntegrationTest() {
 		// kafka — not overridden
 		assertEquals("doc.events.v1", properties.kafka.topic)
 		assertEquals(3, properties.kafka.partitions)
+
+		// kafka.producer — not overridden
+		assertEquals(Duration.ofSeconds(10), properties.kafka.producer.maxBlock)
+		assertEquals(Duration.ofSeconds(30), properties.kafka.producer.requestTimeout)
+		assertEquals(Duration.ofSeconds(120), properties.kafka.producer.deliveryTimeout)
+		assertEquals(1_048_576, properties.kafka.producer.maxRequestSize)
+
+		// shutdown.drainTimeout — not overridden
+		assertEquals(Duration.ofSeconds(30), properties.shutdown.drainTimeout)
 	}
 }

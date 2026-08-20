@@ -40,8 +40,12 @@ class RelayMetrics(
 	private val deadTransition: Counter = registry.counter("relay.dead.transition.total")
 	private val deadRecovery: Counter = registry.counter("relay.dead.recovery.total")
 	private val zombieReclaim: Counter = registry.counter("relay.zombie.reclaim.total")
+	private val forcedRepublish: Counter = registry.counter("relay.forced.republish.total")
+	private val staleWrites: Counter = registry.counter("relay.stale.write.total")
+	private val markFailures: Counter = registry.counter("relay.mark.failure.total")
 	private val reconnects: Counter = registry.counter("relay.listener.reconnect.total")
-	private val latency: Timer = registry.timer("relay.publish.latency")
+	private val firstAttemptLatency: Timer = registry.timer("relay.publish.latency", "attempt", "first")
+	private val retryLatency: Timer = registry.timer("relay.publish.latency", "attempt", "retry")
 	private val batchSize: DistributionSummary = registry.summary("relay.drain.batch.size")
 
 	private val pendingGauge = AtomicInteger(0)
@@ -62,13 +66,26 @@ class RelayMetrics(
 	fun recordDeadTransition(count: Int) = deadTransition.increment(count.toDouble())
 	fun recordDeadRecovery(count: Int) = deadRecovery.increment(count.toDouble())
 	fun recordZombieReclaim(count: Int) = zombieReclaim.increment(count.toDouble())
+
+	/** 파괴적 동작이라 REPUBLISH 와 별도로 센다. */
+	fun recordForcedRepublish() = forcedRepublish.increment()
+
+	/** 소유권 확인에 튕긴 결과 쓰기 건수. 0보다 크면 경합이 실재한다는 뜻이다. */
+	fun recordStaleWrite(count: Int) = staleWrites.increment(count.toDouble())
+
+	/** 결과 기록(성공/실패 반영) 자체가 DB 예외로 실패한 횟수. */
+	fun recordMarkFailure() = markFailures.increment()
 	fun recordBatchSize(size: Int) = batchSize.record(size.toDouble())
 
 	/**
-	 * 행이 만들어진 순간부터 발행이 끝난 지금까지의 시간을 기록한다. 릴레이가 발행에 쓴 시간이
-	 * 아니라 사용자가 업로드한 뒤 워커에게 도착하기까지의 전체 지연이다.
+	 * 행이 만들어진 순간부터 발행이 끝난 지금까지의 시간을 기록한다. [firstAttempt] 가 false 면
+	 * DEAD 순환을 한 번 이상 거친 뒤라 값이 수십 분으로 찍혀 정상 경로의 히스토그램을 오염시킨다.
+	 * 태그로 분리해 정상 경로의 지연을 따로 본다.
 	 */
-	fun recordLatency(createdAt: Instant) = latency.record(Duration.between(createdAt, Instant.now()))
+	fun recordLatency(createdAt: Instant, firstAttempt: Boolean) {
+		val timer = if (firstAttempt) firstAttemptLatency else retryLatency
+		timer.record(Duration.between(createdAt, Instant.now()))
+	}
 
 	/**
 	 * 상태별 건수를 주기적으로 한 번의 쿼리로 갱신한다. 지표를 수집해 갈 때마다 세면
