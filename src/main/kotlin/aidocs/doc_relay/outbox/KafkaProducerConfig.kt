@@ -41,6 +41,10 @@ class KafkaProducerConfig(
 		configs[ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG] = ByteArraySerializer::class.java
 		configs[ProducerConfig.ACKS_CONFIG] = "all"
 		configs[ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG] = true
+		configs[ProducerConfig.MAX_BLOCK_MS_CONFIG] = relayProperties.kafka.producer.maxBlock.toMillis().toInt()
+		configs[ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG] = relayProperties.kafka.producer.requestTimeout.toMillis().toInt()
+		configs[ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG] = relayProperties.kafka.producer.deliveryTimeout.toMillis().toInt()
+		configs[ProducerConfig.MAX_REQUEST_SIZE_CONFIG] = relayProperties.kafka.producer.maxRequestSize
 		return DefaultKafkaProducerFactory(configs)
 	}
 
