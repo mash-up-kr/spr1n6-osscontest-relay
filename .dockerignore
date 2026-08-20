@@ -1,0 +1,20 @@
+.git
+.gitignore
+.gradle
+build
+bin
+out
+
+# 리포 전체 사본이 들어 있다. 빼지 않으면 빌드 컨텍스트가 두 배가 된다.
+.worktrees
+
+.idea
+.vscode
+.kotlin
+# 이미지에 들어가는 건 gradle 빌드 파일과 src 뿐이다. 나머지는 컨텍스트 전송에서 뺀다.
+# demo/ 는 컴포즈가 바인드 마운트로 읽으므로 빌드 컨텍스트에 없어도 된다.
+docs
+demo
+*.iml
+HELP.md
+README.md
