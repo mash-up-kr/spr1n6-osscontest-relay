@@ -235,7 +235,10 @@ class OutboxRepository(
 				id = rs.getObject("id", UUID::class.java),
 				tenantId = rs.getLong("tenant_id"),
 				documentId = rs.getLong("document_id"),
-				documentVersionId = rs.getLong("document_version_id"),
+				// getLong 뒤에 wasNull 을 반드시 확인한다. getLong 은 SQL NULL 에 예외를 내지 않고
+				// 0 을 돌려주므로, 이 확인을 빼면 DOCUMENT_DELETED 처럼 값이 없는 이벤트가 0 번
+				// 버전으로 둔갑해 오류 없이 그대로 발행된다.
+				documentVersionId = rs.getLong("document_version_id").takeUnless { rs.wasNull() },
 				eventType = rs.getString("event_type"),
 				eventSchemaVersion = rs.getInt("event_schema_version"),
 				payload = rs.getString("payload"),

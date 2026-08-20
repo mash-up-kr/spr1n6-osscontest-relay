@@ -83,7 +83,9 @@ abstract class RelayIntegrationTest {
 	/** outbox 행을 원하는 상태로 직접 만든다. 테스트 준비 전용이며 운영 코드는 INSERT 하지 않는다. */
 	protected fun insertOutbox(
 		documentId: Long,
-		documentVersionId: Long,
+		/** DOCUMENT_DELETED 는 문서 단위 이벤트라 null 이다. 스키마의 CHECK 가 이 관계를 강제한다. */
+		documentVersionId: Long?,
+		eventType: String = "INDEXING_REQUESTED",
 		status: String = "PENDING",
 		attemptCount: Int = 0,
 		// JVM 시각과 Postgres now() 사이 clock skew 때문에 "정확히 지금"을 기본값으로 두면
@@ -99,7 +101,7 @@ abstract class RelayIntegrationTest {
 				payload, trace_id, status, publish_attempt_count, next_attempt_at,
 				locked_by, locked_at
 			)
-			SELECT :id, d.tenant_id, :documentId, :versionId, 'INDEXING_REQUESTED',
+			SELECT :id, d.tenant_id, :documentId, :versionId, :eventType,
 			       '{"versionNo":1,"occurredAt":"2026-08-13T09:14:22Z"}'::jsonb, 'trace-1',
 			       :status, :attemptCount, :nextAttemptAt,
 			       CASE WHEN :lockedAt::timestamptz IS NULL THEN NULL ELSE 'other-instance' END, :lockedAt
@@ -109,6 +111,7 @@ abstract class RelayIntegrationTest {
 			.param("id", id)
 			.param("documentId", documentId)
 			.param("versionId", documentVersionId)
+			.param("eventType", eventType)
 			.param("status", status)
 			.param("attemptCount", attemptCount)
 			.param("nextAttemptAt", nextAttemptAt.let { java.sql.Timestamp.from(it) })
