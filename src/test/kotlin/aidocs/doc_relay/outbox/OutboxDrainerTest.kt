@@ -1,8 +1,11 @@
 package aidocs.doc_relay.outbox
 
+import aidocs.doc_relay.RelayProperties
 import aidocs.doc_relay.support.RelayIntegrationTest
+import io.micrometer.core.instrument.MeterRegistry
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import java.time.Instant
 import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -10,6 +13,9 @@ import kotlin.test.assertNotEquals
 class OutboxDrainerTest : RelayIntegrationTest() {
 
 	@Autowired private lateinit var drainer: OutboxDrainer
+	@Autowired private lateinit var repository: OutboxRepository
+	@Autowired private lateinit var properties: RelayProperties
+	@Autowired private lateinit var registry: MeterRegistry
 
 	@Test
 	fun `drains a pending row all the way to published`() {
@@ -74,9 +80,46 @@ class OutboxDrainerTest : RelayIntegrationTest() {
 
 		// 뒤섞이거나 하나로 합쳐졌다면 (예: markFailed 를 failed 값 전체를 flatten 하고
 		// 메시지 하나만 골라 한 번에 호출) 여기서 두 값이 같아진다.
+		// FailureClassifier 도입 이후 RecordTooLargeException 은 영구 실패로 분류돼 DEAD 로
+		// 간다. 이 테스트가 원래 증명하려는 것 — 배치 안에서 각 행이 자기 자신의 에러 메시지만
+		// 받고 다른 행의 메시지와 섞이지 않는다 — 는 상태가 DEAD 로 바뀌어도 그대로 유효하다.
 		assertNotEquals(error1, error2)
-		assertEquals("PENDING", statusOf(id1))
-		assertEquals("PENDING", statusOf(id2))
+		assertEquals("DEAD", statusOf(id1))
+		assertEquals("DEAD", statusOf(id2))
+	}
+
+	@Test
+	fun `markPublished rejects a mismatched claimedAt and records it as a stale write`() {
+		// drainer 의 internal 헬퍼를 직접 호출해 reportStaleness -> metrics.recordStaleWrite
+		// 배선이 drainOnce() 전체를 거치지 않고도 실제로 도는지 확인한다. SQL 레벨의 소유권
+		// 거부 자체는 OutboxRepositoryMarkTest 에서 이미 검증했다.
+		val documentId = seedParents()
+		val versionId = insertVersion(documentId)
+		jdbc.sql("DELETE FROM outbox_event").update()
+		val id = insertOutbox(documentId, versionId)
+		val claimed = repository.claimBatch(10)
+		val byId = claimed.associateBy { it.id }
+		val before = registry.counter("relay.stale.write.total").count()
+
+		drainer.markPublishedSafely(listOf(id), properties.instanceId, Instant.now().minusSeconds(999), byId)
+
+		assertEquals(before + 1, registry.counter("relay.stale.write.total").count())
+		assertEquals("PUBLISHING", statusOf(id), "소유권이 안 맞는 쓰기는 행을 건드리면 안 된다")
+	}
+
+	@Test
+	fun `markFailed rejects a mismatched claimedAt and records it as a stale write`() {
+		val documentId = seedParents()
+		val versionId = insertVersion(documentId)
+		jdbc.sql("DELETE FROM outbox_event").update()
+		val id = insertOutbox(documentId, versionId)
+		repository.claimBatch(10)
+		val before = registry.counter("relay.stale.write.total").count()
+
+		drainer.markFailedSafely(listOf(id), "stale write test", properties.instanceId, Instant.now().minusSeconds(999))
+
+		assertEquals(before + 1, registry.counter("relay.stale.write.total").count())
+		assertEquals("PUBLISHING", statusOf(id), "소유권이 안 맞는 쓰기는 행을 건드리면 안 된다")
 	}
 
 	/** payload 를 [padLength] 길이의 문자열을 품은 (여전히 유효한) 큰 JSON 으로 바꾼다. */

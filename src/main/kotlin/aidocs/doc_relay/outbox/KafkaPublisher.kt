@@ -22,23 +22,25 @@ class KafkaPublisher(
 	private val kafkaTemplate: KafkaTemplate<String, ByteArray>,
 	private val envelopeAssembler: EnvelopeAssembler,
 	private val properties: RelayProperties,
+	private val failureClassifier: FailureClassifier,
 ) {
 
 	fun publish(rows: List<OutboxEventRow>): PublishOutcome {
 		if (rows.isEmpty()) return PublishOutcome.EMPTY
 
 		val succeeded = mutableListOf<UUID>()
-		val failed = mutableMapOf<String, MutableList<UUID>>()
+		val failed = mutableMapOf<FailureGroup, MutableList<UUID>>()
 
-		// 메시지를 만드는 과정에서 예외가 날 수 있다. payload 가 깨져 있으면 봉투 조립이 실패한다.
-		// 그 예외를 여기서 잡지 않으면 문제가 있는 행 하나 때문에 뒤에 있는 멀쩡한 행들이
-		// 보내지지도 못하고, 결과를 돌려주는 대신 예외로 끝나 이번 사이클 전체가 날아간다.
-		// 행마다 따로 감싸서 실패한 행만 실패 목록으로 보내고 나머지는 그대로 보낸다.
 		val inFlight: List<Pair<OutboxEventRow, CompletableFuture<*>>> = rows.mapNotNull { row ->
 			try {
-				row to kafkaTemplate.send(toRecord(row))
+				val record = try {
+					toRecord(row)
+				} catch (e: Exception) {
+					throw EnvelopeAssemblyException(e)
+				}
+				row to kafkaTemplate.send(record)
 			} catch (e: Exception) {
-				failed.getOrPut(messageOf(e)) { mutableListOf() } += row.id
+				addFailure(failed, e, row.id)
 				null
 			}
 		}
@@ -49,10 +51,15 @@ class KafkaPublisher(
 				future.join()
 				succeeded += row.id
 			} catch (e: Exception) {
-				failed.getOrPut(messageOf(e)) { mutableListOf() } += row.id
+				addFailure(failed, e, row.id)
 			}
 		}
 		return PublishOutcome(succeeded, failed)
+	}
+
+	private fun addFailure(failed: MutableMap<FailureGroup, MutableList<UUID>>, e: Exception, id: UUID) {
+		val group = FailureGroup(messageOf(e), failureClassifier.isPermanent(e))
+		failed.getOrPut(group) { mutableListOf() } += id
 	}
 
 	private fun messageOf(e: Exception): String =

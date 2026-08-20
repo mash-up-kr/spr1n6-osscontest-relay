@@ -34,6 +34,7 @@ class KafkaPublisherTest : RelayIntegrationTest() {
 		traceId = "trace-1",
 		publishAttemptCount = 0,
 		createdAt = Instant.parse("2026-08-13T09:14:22Z"),
+		lockedAt = Instant.now(),
 	)
 
 	/**
@@ -126,8 +127,8 @@ class KafkaPublisherTest : RelayIntegrationTest() {
 
 	@Test
 	fun `same document id lands on one partition in order`() {
-		// spec §10 시나리오 8. 키가 documentId 인 것만으로는 부족하고,
-		// 같은 키의 N건이 실제로 순서를 유지하는지까지 봐야 한다.
+		// 파티션 키가 documentId 인 것만으로는 부족하다 — 같은 키의 여러 건이 실제로 순서를
+		// 유지하는지까지 확인해야 한다.
 		val rows = (1..10).map { row(documentId = 42) }
 
 		publisher.publish(rows)
@@ -136,5 +137,28 @@ class KafkaPublisherTest : RelayIntegrationTest() {
 		assertEquals(1, consumed.map { it.first }.toSet().size, "키가 하나여야 한다")
 		val ids = consumed.map { mapper.readTree(it.second)["eventId"].asString() }
 		assertEquals(rows.map { it.id.toString() }, ids, "순서가 유지되지 않았다")
+	}
+
+	@Test
+	fun `an unparseable payload is classified as a permanent failure`() {
+		// jsonb 컬럼은 저장 시점에 문법을 검증하므로 DB 를 거치는 행으로는 깨진 payload 를
+		// 만들 수 없다 — publish() 에 직접 넘기는 행으로만 재현 가능하다 ("a bad row does not
+		// abort the rest of the batch" 테스트가 이미 쓴 방식과 같다).
+		val bad = row().copy(payload = "not valid json")
+
+		val outcome = publisher.publish(listOf(bad))
+
+		val group = outcome.failed.keys.single()
+		assertTrue(group.permanent, "봉투 조립 실패는 영구 실패로 분류돼야 한다")
+	}
+
+	@Test
+	fun `a message over the broker size limit is classified as a permanent failure`() {
+		val big = row().copy(payload = """{"pad":"${"a".repeat(1_200_000)}"}""")
+
+		val outcome = publisher.publish(listOf(big))
+
+		val group = outcome.failed.keys.single()
+		assertTrue(group.permanent, "브로커 크기 상한 초과는 영구 실패로 분류돼야 한다")
 	}
 }
