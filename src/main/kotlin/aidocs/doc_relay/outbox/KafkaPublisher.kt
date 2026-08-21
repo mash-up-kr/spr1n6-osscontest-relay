@@ -62,8 +62,14 @@ class KafkaPublisher(
 		failed.getOrPut(group) { mutableListOf() } += id
 	}
 
+	/**
+	 * 실패 사유로 남길 문자열. 포장 예외가 아니라 맨 끝 원인의 메시지를 쓴다.
+	 *
+	 * 한 겹만 벗기면 브로커가 거절한 실패에서 KafkaTemplate 이 씌운 "Failed to send" 가 남는다.
+	 * 그건 실패했다는 말일 뿐 왜 실패했는지가 아니라서, DEAD 목록을 열어도 원인을 알 수 없다.
+	 */
 	private fun messageOf(e: Exception): String =
-		(e.cause ?: e).let { it.message ?: it.javaClass.simpleName }
+		e.causeChain().last().let { it.message ?: it.javaClass.simpleName }
 
 	private fun toRecord(row: OutboxEventRow): ProducerRecord<String, ByteArray> {
 		// 메시지 키를 document_id 로 둔다. 같은 키는 항상 같은 파티션으로 가고 파티션 안에서는
