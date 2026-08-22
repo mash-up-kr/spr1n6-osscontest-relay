@@ -24,7 +24,10 @@ class EnvelopeAssembler(private val mapper: ObjectMapper) {
 			put("eventId", row.id.toString())
 			put("tenantId", row.tenantId)
 			put("documentId", row.documentId)
-			put("documentVersionId", row.documentVersionId)
+			// 컬럼이 NULL 이면 필드를 빼지 않고 null 로 넣는다. 필드의 유무가 이벤트 종류에 따라
+			// 달라지면 받는 쪽이 종류별로 분기해야 하고, 그건 이 클래스가 피하려는 바로 그것이다.
+			row.documentVersionId?.let { put("documentVersionId", it) }
+				?: putNull("documentVersionId")
 			put("eventType", row.eventType)
 			put("schemaVersion", row.eventSchemaVersion)
 			put("occurredAt", DateTimeFormatter.ISO_INSTANT.format(row.createdAt))

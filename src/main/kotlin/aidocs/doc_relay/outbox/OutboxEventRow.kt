@@ -13,7 +13,15 @@ data class OutboxEventRow(
 	val id: UUID,
 	val tenantId: Long,
 	val documentId: Long,
-	val documentVersionId: Long,
+	/**
+	 * 이벤트 종류에 따라 없을 수 있다. INDEXING_REQUESTED 는 버전 단위라 값을 가지고,
+	 * DOCUMENT_DELETED 는 문서 단위라 NULL 이다 — 스키마의 ck_outbox_*_target 이 이 관계를 강제한다.
+	 *
+	 * nullable 이어야 하는 이유가 하나 더 있다. NOT NULL 로 두면 JDBC 의 getLong 이 SQL NULL 을
+	 * 0 으로 돌려주는 탓에(getLong 은 NULL 에 예외를 내지 않는다) 없는 값이 0 번 버전으로 둔갑해
+	 * 오류 없이 그대로 발행된다.
+	 */
+	val documentVersionId: Long?,
 	val eventType: String,
 	val eventSchemaVersion: Int,
 	val payload: String,

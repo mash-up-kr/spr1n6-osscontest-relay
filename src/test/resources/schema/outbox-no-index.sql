@@ -55,7 +55,9 @@ CREATE TABLE outbox_event (
     id                    UUID PRIMARY KEY,
     tenant_id             BIGINT      NOT NULL,
     document_id           BIGINT      NOT NULL,
-    document_version_id   BIGINT      NOT NULL,
+    -- INDEXING_REQUESTED 는 버전 단위라 값을 가지고, DOCUMENT_DELETED 는 문서 단위라 NULL 이다.
+    -- 아래 두 CHECK 가 이벤트 종류별로 값의 유무를 강제한다.
+    document_version_id   BIGINT,
     event_type            VARCHAR(50) NOT NULL,
     event_schema_version  INTEGER     NOT NULL DEFAULT 1,
     payload               JSONB       NOT NULL,
@@ -75,8 +77,16 @@ CREATE TABLE outbox_event (
     CONSTRAINT fk_outbox_document_version
         FOREIGN KEY (document_version_id, document_id)
         REFERENCES document_version(id, document_id),
+    CONSTRAINT ck_outbox_schema_version
+        CHECK (event_schema_version > 0),
     CONSTRAINT ck_outbox_event_type
-        CHECK (event_type IN ('INDEXING_REQUESTED')),
+        CHECK (event_type IN ('INDEXING_REQUESTED', 'DOCUMENT_DELETED')),
+    CONSTRAINT ck_outbox_indexing_request_target
+        CHECK (event_type <> 'INDEXING_REQUESTED'
+               OR document_version_id IS NOT NULL),
+    CONSTRAINT ck_outbox_document_deleted_target
+        CHECK (event_type <> 'DOCUMENT_DELETED'
+               OR document_version_id IS NULL),
     CONSTRAINT ck_outbox_status
         CHECK (status IN ('PENDING', 'PUBLISHING', 'PUBLISHED', 'DEAD')),
     CONSTRAINT ck_outbox_publish_attempt_count

@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OutboxRepositoryClaimTest : RelayIntegrationTest() {
@@ -26,6 +27,22 @@ class OutboxRepositoryClaimTest : RelayIntegrationTest() {
 		assertEquals(id, claimed.single().id)
 		assertEquals("INDEXING_REQUESTED", claimed.single().eventType)
 		assertEquals("PUBLISHING", statusOf(id))
+	}
+
+	@Test
+	fun `reads a null document_version_id as null instead of zero`() {
+		// DOCUMENT_DELETED 는 문서 단위 이벤트라 document_version_id 가 NULL 이다.
+		// JDBC 의 getLong 은 SQL NULL 에 예외를 내지 않고 0 을 돌려주므로, wasNull 확인을 빼면
+		// 없는 값이 0 번 버전으로 둔갑해 오류 없이 그대로 발행된다. 실패해도 조용하다는 게 요점이다.
+		val documentId = seedParents()
+		insertVersion(documentId)
+		jdbc.sql("DELETE FROM outbox_event").update()
+		insertOutbox(documentId, documentVersionId = null, eventType = "DOCUMENT_DELETED")
+
+		val claimed = repository.claimBatch(10).single()
+
+		assertEquals("DOCUMENT_DELETED", claimed.eventType)
+		assertNull(claimed.documentVersionId)
 	}
 
 	@Test
