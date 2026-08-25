@@ -7,14 +7,14 @@ import java.time.Duration
 import kotlin.test.assertEquals
 
 /**
- * Proves that `application.yaml` keys actually bind to `RelayProperties` via Spring's
- * relaxed @ConfigurationProperties binding (kebab-case → camelCase). The defaults-only
- * test cannot catch YAML typos because every Kotlin default equals its YAML value —
- * e.g. a misspelled key like `bacth-size` silently falls back to the identical default.
- * This test catches such typos by asserting the real Spring context bean values.
+ * application.yaml 의 키가 실제로 RelayProperties 에 바인딩되는지 확인한다.
  *
- * NOTE: RelayIntegrationTest's @TestPropertySource overrides five properties to 1h/false.
- * We assert only the eleven properties NOT overridden, which prove the YAML binding path.
+ * 기본값만 보는 테스트로는 YAML 오타를 잡지 못한다. Kotlin 기본값과 YAML 값이 같아서,
+ * `bacth-size` 처럼 잘못 적은 키는 오류 없이 조용히 같은 기본값으로 떨어지기 때문이다.
+ * 그래서 스프링 컨텍스트가 실제로 만든 빈의 값을 단언한다.
+ *
+ * RelayIntegrationTest 의 @TestPropertySource 가 덮어쓰는 다섯 개는 제외하고, 덮어쓰지 않은
+ * 값만 단언한다 — 그 값들만이 YAML 바인딩 경로를 지난 값이다.
  */
 class RelayPropertiesBindingTest : RelayIntegrationTest() {
 
@@ -23,36 +23,36 @@ class RelayPropertiesBindingTest : RelayIntegrationTest() {
 
 	@Test
 	fun `application yaml binds to relay properties`() {
-		// drain — not overridden
+		// 드레인 배치 크기
 		assertEquals(100, properties.drain.batchSize)
 
-		// backoff — not overridden
+		// 백오프
 		assertEquals(Duration.ofSeconds(10), properties.backoff.base)
 		assertEquals(Duration.ofMinutes(5), properties.backoff.max)
 		assertEquals(5, properties.backoff.maxAttempts)
 
-		// dead.recoveryDelay — not overridden (only recoveryScanInterval is)
+		// DEAD 복구 지연 (스캔 주기만 덮어쓴다)
 		assertEquals(Duration.ofMinutes(10), properties.dead.recoveryDelay)
 
-		// zombie.lockTimeout — not overridden (only scanInterval is)
+		// 좀비 락 타임아웃 (스캔 주기만 덮어쓴다)
 		assertEquals(Duration.ofMinutes(5), properties.zombie.lockTimeout)
 
-		// listener channel and reconnect settings — not overridden (only enabled is)
+		// 리스너 채널과 재연결 설정 (enabled 만 덮어쓴다)
 		assertEquals("outbox_event", properties.listener.channel)
 		assertEquals(Duration.ofSeconds(1), properties.listener.reconnectBase)
 		assertEquals(Duration.ofSeconds(30), properties.listener.reconnectMax)
 
-		// kafka — not overridden
+		// Kafka 토픽과 파티션
 		assertEquals("doc.events.v1", properties.kafka.topic)
 		assertEquals(3, properties.kafka.partitions)
 
-		// kafka.producer — not overridden
+		// Kafka 프로듀서 타임아웃과 메시지 상한
 		assertEquals(Duration.ofSeconds(10), properties.kafka.producer.maxBlock)
 		assertEquals(Duration.ofSeconds(30), properties.kafka.producer.requestTimeout)
 		assertEquals(Duration.ofSeconds(120), properties.kafka.producer.deliveryTimeout)
 		assertEquals(1_048_576, properties.kafka.producer.maxRequestSize)
 
-		// shutdown.drainTimeout — not overridden
+		// 정상 종료 드레인 대기 상한
 		assertEquals(Duration.ofSeconds(30), properties.shutdown.drainTimeout)
 	}
 }

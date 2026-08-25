@@ -6,6 +6,8 @@ import aidocs.doc_relay.observability.OutboxCounts
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
+import java.sql.Timestamp
+import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
@@ -58,12 +60,12 @@ class OutboxRepository(
 	 * 같은 배치로 잡힌 행은 모두 같은 locked_at을 갖는다 — 즉 "이번 선점 시각"이 사이클 하나를
 	 * 가리키는 값이 되고, 그래서 새 컬럼 없이도 배치 UPDATE를 유지한 채 소유권을 확인할 수 있다.
 	 */
-	fun markPublished(ids: List<UUID>, instanceId: String, claimedAt: java.time.Instant): Int {
+	fun markPublished(ids: List<UUID>, instanceId: String, claimedAt: Instant): Int {
 		if (ids.isEmpty()) return 0
 		return jdbc.sql(MARK_PUBLISHED_SQL)
 			.param("ids", ids)
 			.param("instanceId", instanceId)
-			.param("claimedAt", java.sql.Timestamp.from(claimedAt))
+			.param("claimedAt", Timestamp.from(claimedAt))
 			.update()
 	}
 
@@ -80,7 +82,7 @@ class OutboxRepository(
 	 *
 	 * [markPublished] 와 같은 소유권 조건을 결과 실패 기록에도 적용한다.
 	 */
-	fun markFailed(ids: List<UUID>, message: String, instanceId: String, claimedAt: java.time.Instant): Int {
+	fun markFailed(ids: List<UUID>, message: String, instanceId: String, claimedAt: Instant): Int {
 		if (ids.isEmpty()) return 0
 		return jdbc.sql(MARK_FAILED_SQL)
 			.param("ids", ids)
@@ -90,7 +92,7 @@ class OutboxRepository(
 			.param("maxSeconds", backoffPolicy.maxSeconds)
 			.param("deadRecoveryDelaySeconds", properties.dead.recoveryDelay.toMillis() / 1000.0)
 			.param("instanceId", instanceId)
-			.param("claimedAt", java.sql.Timestamp.from(claimedAt))
+			.param("claimedAt", Timestamp.from(claimedAt))
 			.update()
 	}
 
@@ -99,13 +101,13 @@ class OutboxRepository(
 	 * 소유권 조건을 쓰되, 시도 횟수 임계값을 보지 않고 무조건 DEAD + next_attempt_at = 'infinity'
 	 * 다 — 새 상태나 컬럼을 만들지 않고 기존 정지 스위치를 재사용한다.
 	 */
-	fun markDead(ids: List<UUID>, message: String, instanceId: String, claimedAt: java.time.Instant): Int {
+	fun markDead(ids: List<UUID>, message: String, instanceId: String, claimedAt: Instant): Int {
 		if (ids.isEmpty()) return 0
 		return jdbc.sql(MARK_DEAD_SQL)
 			.param("ids", ids)
 			.param("message", message)
 			.param("instanceId", instanceId)
-			.param("claimedAt", java.sql.Timestamp.from(claimedAt))
+			.param("claimedAt", Timestamp.from(claimedAt))
 			.update()
 	}
 

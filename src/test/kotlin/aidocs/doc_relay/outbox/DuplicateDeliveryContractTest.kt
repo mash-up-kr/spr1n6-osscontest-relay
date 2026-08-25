@@ -24,9 +24,9 @@ class DuplicateDeliveryContractTest : RelayIntegrationTest() {
 		// at-least-once 계약상 정상이며 워커 멱등성(source_event_id UNIQUE, 청크 UPSERT)이
 		// 흡수한다. 이걸 없애려면 Kafka 트랜잭션과 DB 트랜잭션을 묶어야 하는데 그럴 가치가 없다.
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		val id = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId).query(UUID::class.java).single()
+			.param("v", documentVersionId).query(UUID::class.java).single()
 
 		// 발행까지만 하고 결과 반영을 건너뛴다 = 반영 직전 크래시
 		val claimed = repository.claimBatch(10)

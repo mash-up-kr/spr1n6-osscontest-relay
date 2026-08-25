@@ -5,6 +5,7 @@ import aidocs.doc_relay.observability.RelayMetrics
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.stereotype.Component
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -75,7 +76,7 @@ class OutboxDrainer(
 	 * 창까지 함께 닫힌다. `internal` 가시성은 이 독립성을 직접 테스트하기 위함이다.
 	 */
 	internal fun markPublishedSafely(
-		ids: List<UUID>, instanceId: String, claimedAt: java.time.Instant, byId: Map<UUID, OutboxEventRow>,
+		ids: List<UUID>, instanceId: String, claimedAt: Instant, byId: Map<UUID, OutboxEventRow>,
 	) {
 		if (ids.isEmpty()) return
 		try {
@@ -89,7 +90,7 @@ class OutboxDrainer(
 		}
 	}
 
-	internal fun markFailedSafely(ids: List<UUID>, message: String, instanceId: String, claimedAt: java.time.Instant) {
+	internal fun markFailedSafely(ids: List<UUID>, message: String, instanceId: String, claimedAt: Instant) {
 		try {
 			val updated = repository.markFailed(ids, message, instanceId, claimedAt)
 			reportStaleness(ids, updated)
@@ -100,7 +101,7 @@ class OutboxDrainer(
 		}
 	}
 
-	internal fun markDeadSafely(ids: List<UUID>, message: String, instanceId: String, claimedAt: java.time.Instant) {
+	internal fun markDeadSafely(ids: List<UUID>, message: String, instanceId: String, claimedAt: Instant) {
 		try {
 			val updated = repository.markDead(ids, "PERMANENT: $message", instanceId, claimedAt)
 			reportStaleness(ids, updated)

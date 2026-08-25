@@ -40,9 +40,9 @@ class KafkaOutageRecoveryTest : RelayIntegrationTest() {
 	@Test
 	fun `exhausts retries into dead then recovers automatically`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		val id = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId).query(UUID::class.java).single()
+			.param("v", documentVersionId).query(UUID::class.java).single()
 
 		val firstClaim = repository.claimBatch(10)
 		repository.markFailed(listOf(id), "broker down", properties.instanceId, firstClaim.single().lockedAt)

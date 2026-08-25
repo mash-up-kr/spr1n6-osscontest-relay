@@ -60,9 +60,9 @@ class BrokerRejectionClassificationTest : RelayIntegrationTest() {
 	@Test
 	fun `a message the broker rejects goes dead on the first attempt without retrying`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		val id = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId).query(UUID::class.java).single()
+			.param("v", documentVersionId).query(UUID::class.java).single()
 		// 브로커 상한은 넘지만 프로듀서 상한(1MB)에는 한참 못 미치는 크기.
 		jdbc.sql("UPDATE outbox_event SET payload = jsonb_build_object('pad', repeat('a', 5000)) WHERE id = :id")
 			.param("id", id).update()

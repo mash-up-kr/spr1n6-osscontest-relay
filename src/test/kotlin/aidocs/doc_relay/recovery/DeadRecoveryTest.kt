@@ -24,10 +24,10 @@ class DeadRecoveryTest : RelayIntegrationTest() {
 
 	private fun deadRow(nextAttemptAt: Instant): UUID {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
 		return insertOutbox(
-			documentId, versionId,
+			documentId, documentVersionId,
 			status = "DEAD", attemptCount = 5, nextAttemptAt = nextAttemptAt,
 		)
 	}

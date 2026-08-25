@@ -20,9 +20,9 @@ class OutboxDrainerTest : RelayIntegrationTest() {
 	@Test
 	fun `drains a pending row all the way to published`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)     // 트리거가 outbox 행을 만든다
+		val documentVersionId = insertVersion(documentId)     // 트리거가 outbox 행을 만든다
 		val id = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId).query(java.util.UUID::class.java).single()
+			.param("v", documentVersionId).query(UUID::class.java).single()
 
 		val drained = drainer.drainOnce()
 
@@ -54,20 +54,20 @@ class OutboxDrainerTest : RelayIntegrationTest() {
 	@Test
 	fun `drainOnce routes each row's own error message, never another row's`() {
 		// payload 는 실제 jsonb 컬럼이라 Postgres 가 저장 시점에 문법을 검증한다 — 깨진 JSON
-		// 문자열은 UPDATE 자체가 SQL 에러로 거부되어 EnvelopeAssembler 까지 도달할 수 없다
-		// (직접 확인함). 대신 두 행의 payload 크기를 서로 다르게 키워 Kafka 의
+		// 문자열은 UPDATE 자체가 SQL 에러로 거부되어 EnvelopeAssembler 까지 도달할 수 없다.
+		// 대신 두 행의 payload 크기를 서로 다르게 키워 Kafka 의
 		// max.request.size(기본 1MB) 를 서로 다른 크기로 넘기게 만든다. KafkaProducer.doSend()
 		// 는 ensureValidRecordSize() 에서 실제 직렬화 바이트 수를 메시지에 그대로 박아 동기적으로
 		// RecordTooLargeException 을 던지므로("The message is <N> bytes when serialized..."),
 		// 두 행은 서로 다른 진짜 예외 메시지를 얻는다 — 브로커 상태나 타이밍에 기대지 않는,
 		// 내용(크기)에 의해 결정되는 값이다.
 		val documentId = seedParents()
-		val versionId1 = insertVersion(documentId, versionNo = 1)
-		val versionId2 = insertVersion(documentId, versionNo = 2)
+		val documentVersionId1 = insertVersion(documentId, versionNo = 1)
+		val documentVersionId2 = insertVersion(documentId, versionNo = 2)
 		val id1 = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId1).query(UUID::class.java).single()
+			.param("v", documentVersionId1).query(UUID::class.java).single()
 		val id2 = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId2).query(UUID::class.java).single()
+			.param("v", documentVersionId2).query(UUID::class.java).single()
 		growPayload(id1, 1_200_000)
 		growPayload(id2, 2_000_000)
 
@@ -94,9 +94,9 @@ class OutboxDrainerTest : RelayIntegrationTest() {
 		// 배선이 drainOnce() 전체를 거치지 않고도 실제로 도는지 확인한다. SQL 레벨의 소유권
 		// 거부 자체는 OutboxRepositoryMarkTest 에서 이미 검증했다.
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
-		val id = insertOutbox(documentId, versionId)
+		val id = insertOutbox(documentId, documentVersionId)
 		val claimed = repository.claimBatch(10)
 		val byId = claimed.associateBy { it.id }
 		val before = registry.counter("relay.stale.write.total").count()
@@ -110,9 +110,9 @@ class OutboxDrainerTest : RelayIntegrationTest() {
 	@Test
 	fun `markFailed rejects a mismatched claimedAt and records it as a stale write`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
-		val id = insertOutbox(documentId, versionId)
+		val id = insertOutbox(documentId, documentVersionId)
 		repository.claimBatch(10)
 		val before = registry.counter("relay.stale.write.total").count()
 

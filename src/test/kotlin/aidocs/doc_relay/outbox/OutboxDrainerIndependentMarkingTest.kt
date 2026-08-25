@@ -25,12 +25,12 @@ class OutboxDrainerIndependentMarkingTest : RelayIntegrationTest() {
 	@Test
 	fun `a broken success write does not block failure write or the failure metric`() {
 		val documentId = seedParents()
-		val versionId1 = insertVersion(documentId, versionNo = 1)
-		val versionId2 = insertVersion(documentId, versionNo = 2)
+		val documentVersionId1 = insertVersion(documentId, versionNo = 1)
+		val documentVersionId2 = insertVersion(documentId, versionNo = 2)
 		val id1 = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId1).query(UUID::class.java).single()
+			.param("v", documentVersionId1).query(UUID::class.java).single()
 		val id2 = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId2).query(UUID::class.java).single()
+			.param("v", documentVersionId2).query(UUID::class.java).single()
 		val claimed = repository.claimBatch(10)
 		val byId = claimed.associateBy { it.id }
 		val claimedAt = claimed.first().lockedAt
