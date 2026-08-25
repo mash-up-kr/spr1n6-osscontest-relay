@@ -9,19 +9,14 @@ import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.TestPropertySource
 import kotlin.test.assertEquals
 
-// relay.listener.enabled=true 를 이 클래스에서만 켠다. RelayMetricsTest 와 같은 클래스에 두면
-// @TestPropertySource 가 클래스 단위로 적용돼 다른 테스트들의 insertVersion() 이 진짜 pg_notify 를
-// 쏘게 되고, 항상 도는 DrainTrigger 가 그 테스트들의 명시적 drainOnce() 와 경합한다 —
-// Task 12/13 에서 이미 두 번 발견하고 고친 것과 같은 종류의 버그다. 그래서 별도 클래스로 분리한다.
-// Spring 이 프로퍼티 집합별로 캐싱하는 건 ApplicationContext(빈 그래프)뿐이다 — companion object 의
-// postgres/kafka 컨테이너는 Spring 밖의 순수 Kotlin 싱글턴이라 모든 컨텍스트가 그대로 공유한다.
-// 이 클래스가 끝나도 컨텍스트가 캐시에 남아 있으면 이 클래스의 PgNotificationListener/DrainTrigger
-// (둘 다 SmartLifecycle) 가 JVM 종료까지 백그라운드에서 계속 돌면서, 그 뒤에 실행되는 다른 테스트
-// 클래스가 같은 공유 DB 에 쏘는 insertVersion() 의 진짜 pg_notify 에 반응해 경합을 일으킨다 —
-// "다른 테스트 클래스 자체"가 아니라 "그 클래스의 이미 끝난 컨텍스트에 남은 배경 스레드"가 원인이라
-// 캐싱만으로는 격리되지 않는다. @DirtiesContext(AFTER_CLASS) 로 이 클래스의 컨텍스트를 명시적으로
-// 닫아 stop() 이 호출되게 한다. postgres/kafka 필드는 여전히 안 건드리므로 다른 클래스가 쓸
-// 컨테이너는 그대로 살아 있다.
+// 리스너를 켜는 유일한 클래스라 따로 뗀다. @TestPropertySource 는 클래스 단위로 적용되므로
+// RelayMetricsTest 에 같이 두면 그 테스트들의 insertVersion() 이 진짜 pg_notify 를 쏘고,
+// 그때 도는 DrainTrigger 가 명시적 drainOnce() 와 경합한다.
+//
+// 클래스를 나누는 것만으로는 부족하다. 컨텍스트가 캐시에 남으면 여기서 켠 PgNotificationListener
+// 와 DrainTrigger(둘 다 SmartLifecycle)가 JVM 종료까지 살아, 뒤이어 도는 다른 클래스가 공유 DB 에
+// 쏘는 pg_notify 에까지 반응한다. @DirtiesContext(AFTER_CLASS) 로 컨텍스트를 닫아 stop() 을
+// 부른다. postgres/kafka 는 Spring 밖의 싱글턴이라 그대로 공유된다.
 @TestPropertySource(
 	properties = [
 		"relay.polling.interval=1h",

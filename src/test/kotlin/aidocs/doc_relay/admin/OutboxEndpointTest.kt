@@ -8,6 +8,7 @@ import org.springframework.core.env.Environment
 import org.springframework.test.context.TestPropertySource
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -24,12 +25,12 @@ class OutboxEndpointTest : RelayIntegrationTest() {
 	@Autowired private lateinit var endpoint: OutboxEndpoint
 	@Autowired private lateinit var environment: Environment
 
-	private fun deadRow(): java.util.UUID {
+	private fun deadRow(): UUID {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
 		return insertOutbox(
-			documentId, versionId, status = "DEAD", attemptCount = 5,
+			documentId, documentVersionId, status = "DEAD", attemptCount = 5,
 			nextAttemptAt = Instant.now().plus(10, ChronoUnit.MINUTES),
 		)
 	}
@@ -109,9 +110,9 @@ class OutboxEndpointTest : RelayIntegrationTest() {
 	fun `force_republish makes a published row due again`() {
 		// PUBLISHED 행을 대상으로 하는 파괴적 동작이라 일반 REPUBLISH 와는 별도 액션으로 뒀다.
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		val id = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId).query(java.util.UUID::class.java).single()
+			.param("v", documentVersionId).query(UUID::class.java).single()
 		jdbc.sql("UPDATE outbox_event SET status = 'PUBLISHED', published_at = now() WHERE id = :id")
 			.param("id", id).update()
 

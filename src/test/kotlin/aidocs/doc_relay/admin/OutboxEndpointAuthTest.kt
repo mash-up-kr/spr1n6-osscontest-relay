@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.test.context.TestPropertySource
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
@@ -27,12 +28,12 @@ class OutboxEndpointAuthTest : RelayIntegrationTest() {
 
 	@Autowired private lateinit var endpoint: OutboxEndpoint
 
-	private fun deadRow(): java.util.UUID {
+	private fun deadRow(): UUID {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
 		return insertOutbox(
-			documentId, versionId, status = "DEAD", attemptCount = 5,
+			documentId, documentVersionId, status = "DEAD", attemptCount = 5,
 			nextAttemptAt = Instant.now().plus(10, ChronoUnit.MINUTES),
 		)
 	}

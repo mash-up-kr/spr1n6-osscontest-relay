@@ -9,6 +9,7 @@ import org.springframework.test.context.TestPropertySource
 import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.kafka.KafkaContainer
 import org.testcontainers.postgresql.PostgreSQLContainer
+import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
 
@@ -101,7 +102,7 @@ abstract class RelayIntegrationTest {
 				payload, trace_id, status, publish_attempt_count, next_attempt_at,
 				locked_by, locked_at
 			)
-			SELECT :id, d.tenant_id, :documentId, :versionId, :eventType,
+			SELECT :id, d.tenant_id, :documentId, :documentVersionId, :eventType,
 			       '{"versionNo":1,"occurredAt":"2026-08-13T09:14:22Z"}'::jsonb, 'trace-1',
 			       :status, :attemptCount, :nextAttemptAt,
 			       CASE WHEN :lockedAt::timestamptz IS NULL THEN NULL ELSE 'other-instance' END, :lockedAt
@@ -110,12 +111,12 @@ abstract class RelayIntegrationTest {
 		)
 			.param("id", id)
 			.param("documentId", documentId)
-			.param("versionId", documentVersionId)
+			.param("documentVersionId", documentVersionId)
 			.param("eventType", eventType)
 			.param("status", status)
 			.param("attemptCount", attemptCount)
-			.param("nextAttemptAt", nextAttemptAt.let { java.sql.Timestamp.from(it) })
-			.param("lockedAt", lockedAt?.let { java.sql.Timestamp.from(it) })
+			.param("nextAttemptAt", nextAttemptAt.let { Timestamp.from(it) })
+			.param("lockedAt", lockedAt?.let { Timestamp.from(it) })
 			.update()
 		return id
 	}

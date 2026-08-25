@@ -17,9 +17,9 @@ class FailureClassificationDrainTest : RelayIntegrationTest() {
 	@Test
 	fun `a message over the broker limit goes dead on the first attempt without retrying`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		val id = jdbc.sql("SELECT id FROM outbox_event WHERE document_version_id = :v")
-			.param("v", versionId).query(UUID::class.java).single()
+			.param("v", documentVersionId).query(UUID::class.java).single()
 		jdbc.sql("UPDATE outbox_event SET payload = jsonb_build_object('pad', repeat('a', 1200000)) WHERE id = :id")
 			.param("id", id).update()
 		val before = registry.counter("relay.dead.transition.total").count()

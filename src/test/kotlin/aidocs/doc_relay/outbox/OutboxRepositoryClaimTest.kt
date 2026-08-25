@@ -3,6 +3,7 @@ package aidocs.doc_relay.outbox
 import aidocs.doc_relay.support.RelayIntegrationTest
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import java.sql.Timestamp
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import kotlin.test.assertEquals
@@ -17,9 +18,9 @@ class OutboxRepositoryClaimTest : RelayIntegrationTest() {
 	@Test
 	fun `claims pending rows that are due and marks them publishing`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()   // 트리거가 만든 행 제거, 상태를 직접 통제한다
-		val id = insertOutbox(documentId, versionId)
+		val id = insertOutbox(documentId, documentVersionId)
 
 		val claimed = repository.claimBatch(10)
 
@@ -48,9 +49,9 @@ class OutboxRepositoryClaimTest : RelayIntegrationTest() {
 	@Test
 	fun `does not claim rows whose next_attempt_at is in the future`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
-		insertOutbox(documentId, versionId, nextAttemptAt = Instant.now().plus(1, ChronoUnit.HOURS))
+		insertOutbox(documentId, documentVersionId, nextAttemptAt = Instant.now().plus(1, ChronoUnit.HOURS))
 
 		assertTrue(repository.claimBatch(10).isEmpty())
 	}
@@ -58,10 +59,10 @@ class OutboxRepositoryClaimTest : RelayIntegrationTest() {
 	@Test
 	fun `does not claim rows that are not pending`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
-		insertOutbox(documentId, versionId, status = "PUBLISHED")
-		insertOutbox(documentId, versionId, status = "DEAD")
+		insertOutbox(documentId, documentVersionId, status = "PUBLISHED")
+		insertOutbox(documentId, documentVersionId, status = "DEAD")
 
 		assertTrue(repository.claimBatch(10).isEmpty())
 	}
@@ -69,12 +70,12 @@ class OutboxRepositoryClaimTest : RelayIntegrationTest() {
 	@Test
 	fun `respects the limit and claims oldest first`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
 		val base = Instant.now().minus(1, ChronoUnit.HOURS)
-		val first = insertOutbox(documentId, versionId, nextAttemptAt = base)
-		insertOutbox(documentId, versionId, nextAttemptAt = base.plusSeconds(60))
-		insertOutbox(documentId, versionId, nextAttemptAt = base.plusSeconds(120))
+		val first = insertOutbox(documentId, documentVersionId, nextAttemptAt = base)
+		insertOutbox(documentId, documentVersionId, nextAttemptAt = base.plusSeconds(60))
+		insertOutbox(documentId, documentVersionId, nextAttemptAt = base.plusSeconds(120))
 
 		val claimed = repository.claimBatch(2)
 
@@ -85,9 +86,9 @@ class OutboxRepositoryClaimTest : RelayIntegrationTest() {
 	@Test
 	fun `records the instance id on the locked row`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
-		val id = insertOutbox(documentId, versionId)
+		val id = insertOutbox(documentId, documentVersionId)
 
 		repository.claimBatch(10)
 
@@ -95,7 +96,7 @@ class OutboxRepositoryClaimTest : RelayIntegrationTest() {
 			.param("id", id).query(String::class.java).single()
 		assertTrue(lockedBy.isNotBlank())
 		val lockedAt = jdbc.sql("SELECT locked_at FROM outbox_event WHERE id = :id")
-			.param("id", id).query(java.sql.Timestamp::class.java).single()
+			.param("id", id).query(Timestamp::class.java).single()
 		assertTrue(lockedAt != null)
 	}
 

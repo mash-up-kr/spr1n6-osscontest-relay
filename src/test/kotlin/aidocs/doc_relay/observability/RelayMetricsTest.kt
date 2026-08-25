@@ -62,11 +62,11 @@ class RelayMetricsTest : RelayIntegrationTest() {
 	@Test
 	fun `gauges separate active dead rows from held ones`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
-		insertOutbox(documentId, versionId, status = "DEAD",
+		insertOutbox(documentId, documentVersionId, status = "DEAD",
 			nextAttemptAt = Instant.now().minus(1, ChronoUnit.MINUTES))
-		val heldId = insertOutbox(documentId, versionId, status = "DEAD")
+		val heldId = insertOutbox(documentId, documentVersionId, status = "DEAD")
 		jdbc.sql("UPDATE outbox_event SET next_attempt_at = 'infinity' WHERE id = :id")
 			.param("id", heldId).update()
 

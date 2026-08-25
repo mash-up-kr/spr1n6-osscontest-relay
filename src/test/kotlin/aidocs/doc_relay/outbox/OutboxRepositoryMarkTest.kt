@@ -23,9 +23,9 @@ class OutboxRepositoryMarkTest : RelayIntegrationTest() {
 	/** id와, 이번 사이클에서 claimBatch 가 돌려준 locked_at 을 함께 돌려준다. */
 	private fun freshlyClaimed(attemptCount: Int = 0): Pair<UUID, Instant> {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
-		val id = insertOutbox(documentId, versionId, attemptCount = attemptCount)
+		val id = insertOutbox(documentId, documentVersionId, attemptCount = attemptCount)
 		val claimed = repository.claimBatch(10)
 		return id to claimed.single().lockedAt
 	}
@@ -102,9 +102,9 @@ class OutboxRepositoryMarkTest : RelayIntegrationTest() {
 	@Test
 	fun `markFailed handles a batch sharing one message`() {
 		val documentId = seedParents()
-		val versionId = insertVersion(documentId)
+		val documentVersionId = insertVersion(documentId)
 		jdbc.sql("DELETE FROM outbox_event").update()
-		val ids = (1..3).map { insertOutbox(documentId, versionId) }
+		val ids = (1..3).map { insertOutbox(documentId, documentVersionId) }
 		val claimed = repository.claimBatch(10)
 		val claimedAt = claimed.first().lockedAt
 

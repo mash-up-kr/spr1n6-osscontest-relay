@@ -110,10 +110,9 @@ class KafkaPublisherTest : RelayIntegrationTest() {
 
 	@Test
 	fun `a bad row does not abort the rest of the batch`() {
-		// KafkaPublisher.kt:25-27 원래 코드는 rows.map { row -> row to kafkaTemplate.send(toRecord(row)) }
-		// 였다. toRecord() 가 envelopeAssembler.assemble() 을 호출하므로 이 자체가 던질 수 있는데
-		// map 은 원소 단위 격리가 없어 한 행에서 던지면 나머지 행은 send() 조차 안 되고 publish() 가
-		// PublishOutcome 대신 예외로 끝난다. payload 를 깨뜨려 그 경로를 강제로 밟는다.
+		// toRecord() 가 envelopeAssembler.assemble() 을 호출하므로 봉투 조립 자체가 던질 수 있다.
+		// 그 예외를 행 단위로 가두지 않으면 한 행이 던질 때 나머지 행은 send() 조차 못 하고
+		// publish() 가 PublishOutcome 대신 예외로 끝난다. payload 를 깨뜨려 그 경로를 밟는다.
 		val good1 = row()
 		val bad = row().copy(payload = "not valid json")
 		val good2 = row()
