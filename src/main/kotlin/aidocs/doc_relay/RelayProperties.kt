@@ -68,12 +68,18 @@ data class RelayProperties(
 	 *
 	 * [enabled] 는 테스트에서 리스너를 꺼 두기 위한 스위치다. 켜 두면 백그라운드 발행이 돌면서
 	 * 테스트가 확인하려는 상태를 먼저 바꿔 버린다.
+	 *
+	 * [keepaliveInterval] 마다 LISTEN 커넥션으로 가벼운 쿼리를 한 번 보낸다. 알림을 기다리는
+	 * 동안에는 서버로 아무것도 보내지 않아서, DB 에 idle_session_timeout 이 걸려 있으면 그
+	 * 주기마다 끊긴다 — 커넥션 풀은 Hikari 의 keepalive-time 이 같은 일을 해 주지만 이 커넥션은
+	 * 풀 밖이라 직접 해야 한다. DB 측 타임아웃보다 넉넉히 짧아야 하고, 0 이면 보내지 않는다.
 	 */
 	data class Listener(
 		val enabled: Boolean = true,
 		val channel: String = "outbox_event",
 		val reconnectBase: Duration = Duration.ofSeconds(1),
 		val reconnectMax: Duration = Duration.ofSeconds(30),
+		val keepaliveInterval: Duration = Duration.ofSeconds(30),
 	)
 
 	/** 상태별 건수를 다시 세는 주기. 짧을수록 지표가 최신이지만 그만큼 DB 를 자주 훑는다. */

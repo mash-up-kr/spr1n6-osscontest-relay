@@ -27,6 +27,11 @@ import kotlin.math.min
  * 재연결에 성공하면 조건 없이 신호를 한 번 보낸다. 끊겨 있던 동안 놓친 알림을 이 한 번이 전부
  * 보상한다.
  *
+ * 알림을 기다리는 동안에는 서버로 아무것도 보내지 않는다. 그래서 DB 가 유휴 세션을 끊는 설정
+ * (idle_session_timeout) 을 쓰면 이 커넥션만 주기적으로 잘린다 — 풀에서 빌린 커넥션은 Hikari 가
+ * keepalive 를 대신 보내 주지만 여기는 풀 밖이다. relay.listener.keepalive-interval 마다 가벼운
+ * 쿼리를 한 번 보내 세션을 살려 둔다.
+ *
  * 접속 정보를 DataSourceProperties 가 아니라 JdbcConnectionDetails 로 받는 이유: 이 프로젝트는
  * application.yaml 에 접속 정보를 두지 않는다. 테스트에서는 Testcontainers 가 컨테이너 주소를
  * JdbcConnectionDetails 빈으로 공급하고, 운영에서는 설정값을 읽는 기본 구현이 등록된다.
@@ -80,12 +85,18 @@ class PgNotificationListener(
 					trigger.signal()
 
 					val pg = connection.unwrap(PGConnection::class.java)
+					val keepaliveNanos = relayProperties.listener.keepaliveInterval.toNanos()
+					var lastKeepaliveAt = System.nanoTime()
 					while (running.get() && !connection.isClosed) {
 						val notifications = pg.getNotifications(NOTIFICATION_POLL_MILLIS)
 						if (!notifications.isNullOrEmpty()) {
 							// 알림 내용은 읽지 않는다. 몇 건이 왔든 깨우기만 하고,
 							// 무엇을 발행할지는 드레인 사이클이 DB 에 다시 묻는다.
 							trigger.signal()
+						}
+						if (keepaliveNanos > 0 && System.nanoTime() - lastKeepaliveAt >= keepaliveNanos) {
+							connection.createStatement().use { it.execute(KEEPALIVE_QUERY) }
+							lastKeepaliveAt = System.nanoTime()
 						}
 					}
 				}
@@ -125,5 +136,8 @@ class PgNotificationListener(
 	companion object {
 		const val APPLICATION_NAME = "doc-relay-listener"
 		private const val NOTIFICATION_POLL_MILLIS = 1_000
+
+		/** 서버에 "아직 살아 있다"만 알리면 되므로 가장 싼 쿼리를 쓴다. */
+		private const val KEEPALIVE_QUERY = "SELECT 1"
 	}
 }

@@ -61,6 +61,10 @@ relay:
     channel: outbox_event
     reconnect-base: 1s
     reconnect-max: 30s
+    # LISTEN 커넥션은 알림을 기다리는 동안 서버로 아무것도 보내지 않아 유휴로 보인다. DB 에
+    # idle_session_timeout 이 걸려 있으면 그 주기마다 끊기므로, 그보다 넉넉히 짧게 둔다.
+    # 풀 커넥션은 spring.datasource.hikari.keepalive-time 이 같은 일을 한다.
+    keepalive-interval: 30s
   metrics:
     gauge-refresh-interval: 30s
   kafka:

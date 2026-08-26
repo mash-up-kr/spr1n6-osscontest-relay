@@ -22,6 +22,7 @@ import kotlin.test.assertTrue
 	properties = [
 		"relay.polling.interval=1h",
 		"relay.listener.enabled=true",
+		"relay.listener.keepalive-interval=1s",
 	]
 )
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -40,6 +41,26 @@ class PgNotificationListenerTest : RelayIntegrationTest() {
 		return false
 	}
 
+	/** LISTEN 전용 커넥션만 골라 끊는다. ApplicationName 이 붙어 있어 이 커넥션만 특정할 수 있다. */
+	private fun terminateListenerBackend() {
+		jdbc.sql(
+			"""
+			SELECT pg_terminate_backend(pid)
+			  FROM pg_stat_activity
+			 WHERE application_name = :appName AND pid <> pg_backend_pid()
+			""".trimIndent()
+		).param("appName", PgNotificationListener.APPLICATION_NAME).query(Boolean::class.java).list()
+	}
+
+	private fun awaitConnected(timeoutMillis: Long): Boolean {
+		val deadline = System.currentTimeMillis() + timeoutMillis
+		while (System.currentTimeMillis() < deadline) {
+			if (listener.connected) return true
+			Thread.sleep(100)
+		}
+		return false
+	}
+
 	@Test
 	fun `notify alone drives the drain within a second`() {
 		val documentId = seedParents()
@@ -53,14 +74,7 @@ class PgNotificationListenerTest : RelayIntegrationTest() {
 		assertTrue(listener.connected, "리스너가 처음부터 연결돼 있어야 한다")
 		val before = listener.reconnectCount
 
-		// LISTEN 전용 커넥션만 골라 끊는다.
-		jdbc.sql(
-			"""
-			SELECT pg_terminate_backend(pid)
-			  FROM pg_stat_activity
-			 WHERE application_name = :appName AND pid <> pg_backend_pid()
-			""".trimIndent()
-		).param("appName", PgNotificationListener.APPLICATION_NAME).query(Boolean::class.java).list()
+		terminateListenerBackend()
 
 		// 끊긴 동안 이벤트가 들어온다. 이 NOTIFY 는 유실된다.
 		val documentId = seedParents()
@@ -82,5 +96,31 @@ class PgNotificationListenerTest : RelayIntegrationTest() {
 		insertVersion(documentId)
 		assertTrue(awaitPublishedCount(1, 10_000), "가짜 알림 뒤에도 정상 동작해야 한다")
 		assertEquals(true, listener.connected)
+	}
+
+	@Test
+	fun `keeps the listen connection alive past the server idle session timeout`() {
+		// 운영 DB 에 걸린 idle_session_timeout 을 짧게 재현한다. LISTEN 커넥션은 알림을 기다리는
+		// 동안 쿼리를 한 줄도 보내지 않아서, keepalive 가 없으면 서버가 유휴로 보고 끊는다.
+		jdbc.sql("ALTER ROLE CURRENT_USER SET idle_session_timeout = '$IDLE_SESSION_TIMEOUT'").update()
+		try {
+			// 세션 설정은 새로 붙는 커넥션부터 적용된다. 지금 붙어 있는 커넥션을 끊어
+			// 짧은 타임아웃을 물고 다시 붙게 한다.
+			terminateListenerBackend()
+			assertTrue(awaitConnected(10_000), "리스너가 다시 연결되지 않았다")
+			val before = listener.reconnectCount
+
+			Thread.sleep(IDLE_TIMEOUT_MILLIS * 3)
+
+			assertEquals(before, listener.reconnectCount, "유휴 타임아웃에 걸려 커넥션이 끊겼다")
+			assertTrue(listener.connected, "리스너가 연결을 유지해야 한다")
+		} finally {
+			jdbc.sql("ALTER ROLE CURRENT_USER RESET idle_session_timeout").update()
+		}
+	}
+
+	private companion object {
+		const val IDLE_SESSION_TIMEOUT = "3s"
+		const val IDLE_TIMEOUT_MILLIS = 3_000L
 	}
 }
