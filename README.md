@@ -1,3 +1,5 @@
+[한국어](README.md) / [English](README_EN.md)
+
 # AI 문서 관리 시스템 — Outbox 릴레이 서버
 
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.1.0-6DB33F?logo=springboot&logoColor=white)
@@ -293,8 +295,11 @@ DB 는 API 서버와 같은 것을 봅니다. dev 환경은 Tmax OpenSQL v3.0, �
 
 ## 문서
 
-- [장애 주입 데모](demo/README.md) — 시나리오 구성과 유실 없음을 확인하는 방법
-- [코드 컨벤션](docs/CODE_CONVENTIONS.md)
+| 문서 | 내용 |
+|---|---|
+| [Architecture](docs/ARCHITECTURE.md) | 릴레이의 책임과 경계, 드레인 파이프라인, 실패 처리와 복구 경로, 설계 결정 |
+| [장애 주입 데모](demo/README.md) | 다섯 가지 시나리오 구성과 유실 없음을 확인하는 방법 |
+| [코드 컨벤션](docs/CODE_CONVENTIONS.md) | 주석·가독성·구조·실패 처리·테스트·커밋 규칙 |
 
 ---
 
